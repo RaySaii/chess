@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <title></title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <!--<link href="css/style.css" rel="stylesheet">-->
+    <script src="https://unpkg.com/vue/dist/vue.js"></script>
+    <script src="//cdn.bootcss.com/socket.io/1.7.1/socket.io.js"></script>
+    <style>
+        .mask {
+            width: 100%;
+            height: 100%;
+            position: fixed;
+            top: 0;
+            left: 0;
+            background: rgba(0, 0, 0, .7);
+            z-index: 100;
+        }
+        
+        .alert {
+            width: 180px;
+            margin: 100px auto;
+            background: white;
+            text-align: center;
+            padding: 10px;
+        }
+        
+        .alert div {
+            padding: 10px
+        }
+        
+        .list {
+            width: 440px;
+            text-align: left;
+        }
+        
+        .board {
+            font-size: 0;
+            width: 440px;
+            margin: auto;
+        }
+        
+        h6 {
+            height: 30px;
+            line-height: 30px;
+            font-size: 12px
+        }
+        
+        li {
+            line-height: 20px;
+            font-size: 12px
+        }
+        
+        i {
+            font-size: 12px;
+            position: relative;
+            display: inline-block;
+            width: 40px;
+            height: 40px;
+            text-align: left;
+        }
+        
+        .block {
+            background: #ccc
+        }
+        
+        .block::before,
+        .block::after {
+            content: ' ';
+            position: absolute;
+            top: 20px;
+            width: 40px;
+            height: 0;
+            border-top: 1px solid #333;
+        }
+        /* | 竖线 */
+        
+        .block::after {
+            top: 0;
+            right: 20px;
+            width: 0;
+            height: 40px;
+            border-top: 0 none;
+            border-right: 1px solid #333;
+        }
+        
+        i i {
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            position: absolute;
+            z-index: 99;
+        }
+        
+        .me {
+            background: #000;
+        }
+        
+        .to {
+            background: white;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="app">
+        <div class="mask" v-if="winner">
+            <div class="alert">
+                <div>{{winner}}赢了</div>
+                <button @click="go()" type="button">继续</button>
+            </div>
+        </div>
+        <h6>你的ID: <span>{{myId}}</span>
+        </h6>
+        <div class="list" v-if="!gaming">
+            <h5>玩家列表</h5>
+            <ol class="users">
+                <li v-for="user in users">
+                    {{user}}
+                    <a href="javascript:;" v-if="someOneWait.indexOf(user)>-1" @click="fight(user)">等待挑战</a>
+                </li>
+            </ol>
+            <button type="button" @click='newRoom()'>创建房间</button>
+        </div>
+        <div class="board" v-if="board">
+            <h6 v-if="room">{{room}}</h6>
+            <ul>
+                <li>黑棋:你</li>
+                <li>白棋:对手</li>
+            </ul>
+            <i class="block" :style="style" v-for="pos in position" @click="next(pos)">
+                <i :class="[{me:mePos.indexOf(pos)>-1},{to:toPos.indexOf(pos)>-1}]"></i>
+            </i>
+        </div>
+    </div>
+</body>
+<script>
+    var socket = io.connect('http://localhost:2016');
+    new Vue({
+        el: '#app',
+        name: 'start',
+        data: {
+            myId: null,
+            users: [],
+            boardWidth: 11,
+            position: [],
+            map: [],
+            someOneWait: [],
+            board: false,
+            gaming: false,
+            room: '',
+            mePos: [],
+            toPos: [],
+            style: {
+                cursor: 'pointer'
+            },
+            winner: ''
+        },
+        created() {
+            socket.on('connect', () => {
+                this.myId = socket.id;
+                console.log(socket.id);
+            })
+
+            socket.on('online', online => {
+                this.users = online;
+            })
+
+            // 有人创建了房间，加入等待列表
+            socket.on('someOneWait', (someOneWait) => {
+                // console.log('wait', id);
+                this.someOneWait = someOneWait;
+            })
+
+            // 有人加入了房间，从等待列表中删除
+            socket.on('begin', (who, id) => {
+                if (who === this.myId || id === this.myId) {
+                    this.init();
+                    this.room = who + ' vs ' + id;
+                    this.gaming = true;
+                };
+            })
+            socket.on('myPos', pos => {
+                // console.log('这是对手的下一步', pos);
+                this.style.cursor = 'pointer';
+
+                this.toPos.push(pos);
+                this.check(this.change(pos), '白棋');
+
+            })
+            socket.on('leave', () => {
+                this.board = false;
+                this.gaming = false;
+            })
+
+        },
+
+        methods: {
+            go() {
+                this.winner = '';
+                this.gaming = false;
+                this.board = false;
+            },
+            newRoom() {
+                // socket.id += '等待挑战';
+                socket.emit('new', socket.id);
+            },
+            init() {
+                this.mePos = [];
+                this.toPos = [];
+                this.board = true;
+                let i = 0;
+                for (x = 0; x < this.boardWidth; x++) {
+                    for (y = 0; y < this.boardWidth; y++) {
+                        this.position[i] = x + '' + y;
+                        this.map[i] = [x, y];
+                        i++;
+                    }
+                }
+            },
+            fight(user) {
+                if (user === this.myId) {
+                    return;
+                }
+                socket.emit('fight', user);
+            },
+            next(pos) {
+                if (this.style.cursor === '') {
+                    return
+                }
+                if (this.mePos.indexOf(pos) > -1 || this.toPos.indexOf(pos) > -1) {
+                    return
+                }
+                this.style.cursor = '';
+                socket.emit('next', pos);
+
+                this.mePos.push(pos);
+                this.check(this.change(pos), '黑棋');
+            },
+            change(pos) {
+                return this.map[this.position.indexOf(pos)];
+            },
+            check(pos, who) {
+
+
+                if (who === '黑棋')
+                    arr = this.mePos
+                else
+                    arr = this.toPos;
+                let count = 1;
+
+
+                for (i = 1; i < 5; i++) {
+                    let hb = pos[0] + '' + (pos[1] - i);
+                    if (pos[1] - i > -1 && arr.indexOf(hb) > -1) {
+                        count++;
+                    }
+                }
+                for (i = 1; i < 5; i++) {
+                    let ha = pos[0] + '' + (pos[1] + i);
+                    if (pos[1] + i < 11 && arr.indexOf(ha) > -1) {
+                        count++;
+                    }
+                }
+                if (count == 5) {
+                    console.log(who + 'win')
+                    this.winner = who;
+                    return
+                }
+
+                count = 1;
+                for (i = 1; i < 5; i++) {
+                    let sb = pos[0] - i + '' + pos[1];
+                    if (pos[0] - i > -1 && arr.indexOf(sb) > -1) {
+                        count++;
+                    }
+                }
+                for (i = 1; i < 5; i++) {
+                    let sa = pos[0] + i + '' + pos[1];
+                    if (pos[0] + i < 11 && arr.indexOf(sa) > -1) {
+                        count++;
+                    }
+                }
+                if (count == 5) {
+                    console.log(who + 'win');
+                    this.winner = who;
+
+                    return
+                }
+
+                // '\'
+                count = 1;
+                for (i = 1; i < 5; i++) {
+                    let zb = pos[0] - i + '' + (pos[1] - i);
+                    if (pos[0] - i > -1 && pos[1] - i > -1 && arr.indexOf(zb) > -1) {
+                        // console.log('左上', zb)
+                        count++;
+                    }
+                }
+                for (i = 1; i < 5; i++) {
+                    let za = pos[0] + i + '' + (pos[1] + i);
+                    if (pos[0] + i < 11 && pos[1] + i < 11 && arr.indexOf(za) > -1) {
+                        // console.log('左下', za)
+                        count++;
+                    }
+                }
+                if (count == 5) {
+                    console.log(who + 'win');
+                    this.winner = who;
+
+                    return
+                }
+
+                // '/'
+                count = 1
+                for (i = 1; i < 5; i++) {
+                    let yb = pos[0] - i + '' + (pos[1] + i);
+                    if (pos[0] - i > -1 && pos[1] + i < 11 && arr.indexOf(yb) > -1) {
+                        count++;
+                    }
+                }
+                for (i = 1; i < 5; i++) {
+                    let ya = pos[0] + i + '' + (pos[1] - i);
+                    if (pos[0] + i < 11 && pos[1] - i > -1 && arr.indexOf(ya) > -1) {
+                        count++;
+                    }
+                }
+                if (count == 5) {
+                    console.log(who + 'win');
+                    this.winner = who;
+
+                    return
+                }
+            },
+
+        },
+        mounted() {},
+        destroyed() {}
+    })
+</script>
+
+</html>
